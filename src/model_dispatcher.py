@@ -1,5 +1,5 @@
-from model_MODEL_NAME import MODEL_NAME
+from model_pointnet import LyftNet
 
 MODELS = {
-    'MODEL_NAME' : MODEL_NAME()
+    'POINTNET' : LyftNet()
 }

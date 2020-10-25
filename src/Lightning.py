@@ -7,67 +7,185 @@ from torch.utils.data import DataLoader
 from glob import glob
 from tqdm import tqdm
 
-class MODEL_NAME_Lightning(pl.LightningModule):
-    def __init__(self, hparams):
-        super(MODEL_NAME_Lightning, self).__init__()
-        self.loss_fn = torch.nn.CTCLoss(blank=77)
-        self.hparams = hparams
-        # import model from model dispatcher
-        self.model = model_dispatcher.MODELS[self.hparams.model_name]
+class BaseNet(LightningModule):   
+    def __init__(self, batch_size=32, lr=5e-4, weight_decay=1e-8, num_workers=0, 
+                 criterion=LyftLoss, data_root=DATA_ROOT,  epochs=1):
+        super().__init__()
 
+       
+        self.save_hyperparameters(
+            dict(
+                HBACKWARD = HBACKWARD,
+                HFORWARD = HFORWARD,
+                NFRAMES = NFRAMES,
+                FRAME_STRIDE = FRAME_STRIDE,
+                AGENT_FEATURE_DIM = AGENT_FEATURE_DIM,
+                MAX_AGENTS = MAX_AGENTS,
+                TRAIN_ZARR = TRAIN_ZARR,
+                VALID_ZARR = VALID_ZARR,
+                batch_size = batch_size,
+                lr=lr,
+                weight_decay=weight_decay,
+                num_workers=num_workers,
+                criterion=criterion,
+                epochs=epochs,
+            )
+        )
+        
+        self._train_data = None
+        self._collate_fn = None
+        self._train_loader = None
 
-    def forward(self, x):
-        return self.model(x)
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        
+        
+        self.lr = lr
+        self.epochs=epochs
+        
+        self.weight_decay = weight_decay
+        self.criterion = criterion
+        
+        self.data_root = data_root
+    
 
+    def train_dataloader(self):
+        z = zarr.open(self.data_root.joinpath(TRAIN_ZARR).as_posix(), "r")
+        scenes = z.scenes.get_basic_selection(slice(None), fields= ["frame_index_interval"])
+        train_data = CustomLyftDataset(
+                    z, 
+                    scenes = scenes,
+                    nframes=NFRAMES,
+                    frame_stride=FRAME_STRIDE,
+                    hbackward=HBACKWARD,
+                    hforward=HFORWARD,
+                    max_agents=MAX_AGENTS,
+                    agent_feature_dim=AGENT_FEATURE_DIM,
+                )
+        
+        train_loader = DataLoader(train_data, batch_size = self.batch_size,collate_fn=collate,
+                                pin_memory=True, num_workers = self.num_workers, shuffle=True)
+        self._train_data = train_data
+        self._train_loader = train_loader
+        
+        return train_loader
 
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=self.hparams.lr)
-        scheduler = {
-            'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=2, cooldown=1, min_lr=1e-08, verbose=True),
-            'monitor': 'val_checkpoint_on',
-            'reduce_on_plateau': False,  # For ReduceLROnPlateau scheduler, default
-            'interval': 'epoch',
-            'frequency': 1 
+    def val_dataloader(self):
+        z = zarr.open(self.data_root.joinpath(VALID_ZARR).as_posix(), "r")
+        scenes = z.scenes.get_basic_selection(slice(None), fields=["frame_index_interval"])
+        val_data = CustomLyftDataset(
+                    z, 
+                    scenes = scenes,
+                    nframes=NFRAMES,
+                    frame_stride=FRAME_STRIDE,
+                    hbackward=HBACKWARD,
+                    hforward=HFORWARD,
+                    max_agents=MAX_AGENTS,
+                    agent_feature_dim=AGENT_FEATURE_DIM,
+                )
+        
+        val_loader = DataLoader(val_data, batch_size = self.batch_size, collate_fn=collate,
+                                pin_memory=True, num_workers = self.num_workers, shuffle=True)
+        self._val_data = val_data
+        self._val_loader = val_loader
+        return val_loader
+
+    def validation_epoch_end(self, outputs):
+        avg_loss = torch.mean(torch.tensor([x['val_loss'] for x in outputs]))
+        avg_mse = torch.mean(torch.tensor([x['val_mse'] for x in outputs]))
+        avg_mae = torch.mean(torch.tensor([x['val_mae'] for x in outputs]))
+        
+        tensorboard_logs = {'val_loss': avg_loss, "val_rmse": torch.sqrt(avg_mse), "val_mae": avg_mae}
+
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        return {
+            'val_loss': avg_loss,
+            'log': tensorboard_logs,
+            "progress_bar": {"val_ll": tensorboard_logs["val_loss"], "val_rmse": tensorboard_logs["val_rmse"]}
         }
+
+    
+    def configure_optimizers(self):
+        optimizer =  optim.Adam(self.parameters(), lr= self.lr, betas= (0.9,0.999), 
+                          weight_decay= self.weight_decay, amsgrad=False)
+        
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=self.epochs,
+            eta_min=1e-5,
+        )
         return [optimizer], [scheduler]
 
 
-    def training_step(self, batch, batch_nb):
-        x = batch['image']
-        y = batch['label']
-        y_hat = self(x)
-        target_lengths = batch['length']
-        input_lengths = batch['bucket']
-        loss = self.loss_fn(y_hat, y, input_lengths, target_lengths)
-        result = pl.TrainResult(minimize=loss)
-        result.loss = loss
-        return result
+class LyftNet(BaseNet):   
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        
+        self.pnet = PointNetfeat()
 
+        self.fc0 = nn.Sequential(
+            nn.Linear(2048+256, 1024), nn.ReLU(),
+        )
 
-    def validation_step(self, batch, batch_nb):
-        x = batch['image']
-        y = batch['label']
-        y_hat = self(x)
-        target_lengths = batch['length']
-        input_lengths = batch['bucket']
-        loss = self.loss_fn(y_hat, y, input_lengths, target_lengths)
-        result = pl.EvalResult(checkpoint_on=loss, early_stop_on=loss)
-        result.loss = loss
-        result.log('val_loss', loss, prog_bar=True, logger=True, sync_dist=True)
-        return result
+        self.fc = nn.Sequential(
+            nn.Linear(1024, 300),
+        )
 
+        self.c_net = nn.Sequential(
+            nn.Linear(1024, 3),
+        )
+        
+    
+    def forward(self, x):
+        bsize, npoints, hb, nf = x.shape 
+        
+        # Push points to the last  dim
+        x = x.transpose(1, 3)
 
-    def test_step(self, batch, batch_nb):
-        x = batch['image']
-        y = batch['label']
-        y_hat = self(x)
-        target_lengths = batch['length']
-        input_lengths = batch['bucket']
-        loss = self.loss_fn(y_hat, y, input_lengths, target_lengths)
-        result = pl.EvalResult(checkpoint_on=loss)
-        result.loss = loss
-        result.log('test_loss', loss, prog_bar=True, logger=True, sync_dist=True)
-        return result
+        # Merge time with features
+        x = x.reshape(bsize, hb*nf, npoints)
+
+        x, trans, trans_feat = self.pnet(x)
+
+        # Push featuresxtime to the last dim
+        x = x.transpose(1,2)
+
+        x = self.fc0(x)
+
+        c = self.c_net(x)
+        x = self.fc(x)
+
+        return c,x
+    
+    def training_step(self, batch, batch_idx):
+        x, y, y_av = [b.to(DEVICE) for b in batch]
+        c, preds = self(x)
+        loss = self.criterion(c,preds,y, y_av)
+        
+        with torch.no_grad():
+            logs = {
+                'loss': loss,
+                "mse": MSE(preds, y, y_av),
+                "mae": MAE(preds, y, y_av),
+            }
+        return {'loss': loss, 'log': logs, "progress_bar": {"rmse":torch.sqrt(logs["mse"]) }}
+    
+    @torch.no_grad()
+    def validation_step(self, batch, batch_idx):
+        x, y, y_av =  [b.to(DEVICE) for b in batch]
+        c,preds = self(x)
+        loss = self.criterion(c, preds, y, y_av)
+        
+        val_logs = {
+            'val_loss': loss,
+            "val_mse": MSE(preds, y, y_av),
+            "val_mae": MAE(preds, y, y_av),
+        }
+        
+        return val_logs
+
 
 def find_ckpt():
     val = float('inf')

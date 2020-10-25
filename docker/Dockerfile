@@ -1,9 +1,11 @@
 FROM pytorchlightning/pytorch_lightning:1.0.3-py3.8-torch1.6
 
-RUN apt-get install byobu git -y
+# RUN apt-get install byobu git -y
 
-RUN pip install --upgrade pip
+RUN pip install --upgrade pip \
+    && pip install zarr \
+    && 
 
-COPY requirements.txt requirements.txt
+# COPY ./requirements.txt requirements.txt
 
-RUN pip3 install -r requirements.txt
+# RUN pip3 install -r requirements.txt

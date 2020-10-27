@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+from torch.autograd import Variable
+
 class STNkd(nn.Module):
     def __init__(self,  k=64):
         super(STNkd, self).__init__()

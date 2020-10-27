@@ -11,7 +11,9 @@ from torch import nn, optim
 
 import zarr
 
-from dataset_pointnet import LyftLoss, CustomLyftDataset, collate, MSE, MAE
+from losses import MAE, MSE, LyftLoss
+
+from dataset_pointnet import LyftDataModule
 
 class BaseNet(pl.LightningModule):   
     def __init__(self, batch_size=32, lr=5e-4, weight_decay=1e-8, num_workers=0, 
@@ -53,48 +55,6 @@ class BaseNet(pl.LightningModule):
         self.criterion = criterion
         
         self.data_root = data_root
-    
-
-    def train_dataloader(self):
-        z = zarr.open(self.data_root.joinpath(config.TRAIN_ZARR).as_posix(), "r")
-        scenes = z.scenes.get_basic_selection(slice(None), fields= ["frame_index_interval"])
-        train_data = CustomLyftDataset(
-                    z, 
-                    scenes = scenes,
-                    nframes=config.NFRAMES,
-                    frame_stride=config.FRAME_STRIDE,
-                    hbackward=config.HBACKWARD,
-                    hforward=config.HFORWARD,
-                    max_agents=config.MAX_AGENTS,
-                    agent_feature_dim=config.AGENT_FEATURE_DIM,
-                )
-        
-        train_loader = DataLoader(train_data, batch_size = self.batch_size,collate_fn=collate,
-                                pin_memory=True, num_workers = self.num_workers, shuffle=True)
-        self._train_data = train_data
-        self._train_loader = train_loader
-        
-        return train_loader
-
-    def val_dataloader(self):
-        z = zarr.open(self.data_root.joinpath(config.VALID_ZARR).as_posix(), "r")
-        scenes = z.scenes.get_basic_selection(slice(None), fields=["frame_index_interval"])
-        val_data = CustomLyftDataset(
-                    z, 
-                    scenes = scenes,
-                    nframes=config.NFRAMES,
-                    frame_stride=config.FRAME_STRIDE,
-                    hbackward=config.HBACKWARD,
-                    hforward=config.HFORWARD,
-                    max_agents=config.MAX_AGENTS,
-                    agent_feature_dim=config.AGENT_FEATURE_DIM,
-                )
-        
-        val_loader = DataLoader(val_data, batch_size = self.batch_size, collate_fn=collate,
-                                pin_memory=True, num_workers = self.num_workers, shuffle=True)
-        self._val_data = val_data
-        self._val_loader = val_loader
-        return val_loader
 
     def validation_epoch_end(self, outputs):
         avg_loss = torch.mean(torch.tensor([x['val_loss'] for x in outputs]))
@@ -227,9 +187,9 @@ if __name__ == "__main__":
     parser.add_argument('--num_workers', type=int, default=1)
     hparams = parser.parse_args()
 
-    dm = DATADataModule(batch_size=hparams.batch_size, num_workers=hparams.num_workers)
+    dm = LyftDataModule(batch_size=hparams.batch_size, num_workers=hparams.num_workers)
 
-    lit_model = MODEL_NAME_Lightning(hparams)
+    lit_model = LyftNet(hparams)
 
     MODEL_SAVE = os.path.join(config.save_path, f'{hparams.model_name}-'+'model_ckpt-{epoch:02d}-{val_loss:.2f}')
 

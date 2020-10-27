@@ -18,6 +18,8 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 from torch.utils.data import Dataset, DataLoader
 
+import zarr
+
 PERCEPTION_LABELS = [
     "PERCEPTION_LABEL_NOT_SET",
     "PERCEPTION_LABEL_UNKNOWN",
@@ -251,48 +253,74 @@ class CustomLyftDataset(Dataset):
         return X, target, target_availability
 
 
+class LyftDataModule(pl.LightningDataModule):
+    def __init__(self, data_dir: str = './', batch_size=10, num_workers=1):
+        super().__init__()
+        self.batch_size = batch_size
+        self.num_workers = num_workers
 
-def collate(x):
-    x = map(np.concatenate, zip(*x))
-    x = map(torch.from_numpy, x)
-    return x
+    def prepare_data(self):
+        print("Data preparation done !")
+        # self.calculate_wts()
 
-def shapefy( xy_pred, xy, xy_av):
-    NDIM = 3
-    xy_pred = xy_pred.view(-1, config.HFORWARD, NDIM, 2)
-    xy = xy.view(-1, config.HFORWARD, 2)[:,:,None]
-    xy_av = xy_av.view(-1, config.HFORWARD)[:,:,None]
-    return xy_pred, xy,xy_av
+    def setup(self, stage=None):
+        # Assign train/val datasets for use in dataloaders
+        print('Reading zarr dataset ...')
 
-def LyftLoss(c, xy_pred, xy, xy_av):
-    c = c.view(-1,c.shape[-1])
-    xy_pred, xy, xy_av  = shapefy(xy_pred, xy, xy_av)
-    
-    c = torch.softmax(c, dim=1)
-    
-    l = torch.sum(torch.mean(torch.square(xy_pred-xy), dim=3)*xy_av, dim=1)
-    
-    # The LogSumExp trick for better numerical stability
-    # https://en.wikipedia.org/wiki/LogSumExp
-    m = l.min(dim=1).values
-    l = torch.exp(m[:, None]-l)
-    
-    l = m - torch.log(torch.sum(l*c, dim=1))
-    denom = xy_av.max(2).values.max(1).values
-    l = torch.sum(l*denom)/denom.sum()
-    return 3*l # I found that my loss is usually 3 times smaller than the LB score
+        if stage == 'fit' or stage is None:
+            # print(config.TRAIN_FOLDS)
+            self.train_z = zarr.open(self.data_root.joinpath(config.TRAIN_ZARR).as_posix(), "r")
+            self.train_scenes = self.train_z.scenes.get_basic_selection(slice(None), fields= ["frame_index_interval"])
 
+            self.val_z = zarr.open(self.data_root.joinpath(config.VALID_ZARR).as_posix(), "r")
+            self.val_scenes = self.val_z.scenes.get_basic_selection(slice(None), fields= ["frame_index_interval"])
 
-def MSE(xy_pred, xy, xy_av):
-    xy_pred, xy, xy_av = shapefy(xy_pred, xy, xy_av)
-    return 9*torch.mean(torch.sum(torch.mean(torch.square(xy_pred-xy), 3)*xy_av, dim=1))
+        if stage == 'test' or stage is None:
+            # print(config.TEST_FOLDS)
+            # self.df_train = df[df.kfold.isin(config.TEST_FOLDS)].reset_index(drop=True)
+            pass
 
-def MAE(xy_pred, xy, xy_av):
-    xy_pred, xy, xy_av = shapefy(xy_pred, xy, xy_av)
-    return 9*torch.mean(torch.sum(torch.mean(torch.abs(xy_pred-xy), 3)*xy_av, dim=1))
+    def train_dataloader(self):
+        train_data = CustomLyftDataset(
+                    self.train_z, 
+                    scenes = self.train_scenes,
+                    nframes=config.NFRAMES,
+                    frame_stride=config.FRAME_STRIDE,
+                    hbackward=config.HBACKWARD,
+                    hforward=config.HFORWARD,
+                    max_agents=config.MAX_AGENTS,
+                    agent_feature_dim=config.AGENT_FEATURE_DIM,
+                )
+        
+        train_loader = DataLoader(train_data, batch_size = self.batch_size,collate_fn=self.collate,
+                                pin_memory=True, num_workers = self.num_workers, shuffle=True)
+        self._train_data = train_data
+        self._train_loader = train_loader
+        
+        return train_loader
 
+    def val_dataloader(self):
+        val_data = CustomLyftDataset(
+                    self.val_z, 
+                    scenes = self.val_scenes,
+                    nframes=config.NFRAMES,
+                    frame_stride=config.FRAME_STRIDE,
+                    hbackward=config.HBACKWARD,
+                    hforward=config.HFORWARD,
+                    max_agents=config.MAX_AGENTS,
+                    agent_feature_dim=config.AGENT_FEATURE_DIM,
+                )
+        
+        val_loader = DataLoader(val_data, batch_size = self.batch_size, collate_fn=self.collate,
+                                pin_memory=True, num_workers = self.num_workers, shuffle=True)
+        self._val_data = val_data
+        self._val_loader = val_loader
+        return val_loader
 
-
+    def collate(self, x):
+        x = map(np.concatenate, zip(*x))
+        x = map(torch.from_numpy, x)
+        return x
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
@@ -301,7 +329,7 @@ if __name__ == "__main__":
     x = 0
     y = 0
 
-    dm = DATADataModule()
+    dm = LyftDataModule()
 
     dm.prepare_data()
 

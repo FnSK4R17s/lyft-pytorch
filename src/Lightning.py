@@ -2,27 +2,33 @@ import pytorch_lightning as pl
 import torch
 import model_dispatcher
 import config
-from dataset import DATADataModule
+# from dataset import DATADataModule
 from torch.utils.data import DataLoader
 from glob import glob
 from tqdm import tqdm
 
-class BaseNet(LightningModule):   
+from torch import nn, optim
+
+import zarr
+
+from dataset_pointnet import LyftLoss, CustomLyftDataset, collate, MSE, MAE
+
+class BaseNet(pl.LightningModule):   
     def __init__(self, batch_size=32, lr=5e-4, weight_decay=1e-8, num_workers=0, 
-                 criterion=LyftLoss, data_root=DATA_ROOT,  epochs=1):
+                 criterion=LyftLoss, data_root=config.DATA_ROOT,  epochs=1):
         super().__init__()
 
        
         self.save_hyperparameters(
             dict(
-                HBACKWARD = HBACKWARD,
-                HFORWARD = HFORWARD,
-                NFRAMES = NFRAMES,
-                FRAME_STRIDE = FRAME_STRIDE,
-                AGENT_FEATURE_DIM = AGENT_FEATURE_DIM,
-                MAX_AGENTS = MAX_AGENTS,
-                TRAIN_ZARR = TRAIN_ZARR,
-                VALID_ZARR = VALID_ZARR,
+                HBACKWARD = config.HBACKWARD,
+                HFORWARD = config.HFORWARD,
+                NFRAMES = config.NFRAMES,
+                FRAME_STRIDE = config.FRAME_STRIDE,
+                AGENT_FEATURE_DIM = config.AGENT_FEATURE_DIM,
+                MAX_AGENTS = config.MAX_AGENTS,
+                TRAIN_ZARR = config.TRAIN_ZARR,
+                VALID_ZARR = config.VALID_ZARR,
                 batch_size = batch_size,
                 lr=lr,
                 weight_decay=weight_decay,
@@ -50,17 +56,17 @@ class BaseNet(LightningModule):
     
 
     def train_dataloader(self):
-        z = zarr.open(self.data_root.joinpath(TRAIN_ZARR).as_posix(), "r")
+        z = zarr.open(self.data_root.joinpath(config.TRAIN_ZARR).as_posix(), "r")
         scenes = z.scenes.get_basic_selection(slice(None), fields= ["frame_index_interval"])
         train_data = CustomLyftDataset(
                     z, 
                     scenes = scenes,
-                    nframes=NFRAMES,
-                    frame_stride=FRAME_STRIDE,
-                    hbackward=HBACKWARD,
-                    hforward=HFORWARD,
-                    max_agents=MAX_AGENTS,
-                    agent_feature_dim=AGENT_FEATURE_DIM,
+                    nframes=config.NFRAMES,
+                    frame_stride=config.FRAME_STRIDE,
+                    hbackward=config.HBACKWARD,
+                    hforward=config.HFORWARD,
+                    max_agents=config.MAX_AGENTS,
+                    agent_feature_dim=config.AGENT_FEATURE_DIM,
                 )
         
         train_loader = DataLoader(train_data, batch_size = self.batch_size,collate_fn=collate,
@@ -71,17 +77,17 @@ class BaseNet(LightningModule):
         return train_loader
 
     def val_dataloader(self):
-        z = zarr.open(self.data_root.joinpath(VALID_ZARR).as_posix(), "r")
+        z = zarr.open(self.data_root.joinpath(config.VALID_ZARR).as_posix(), "r")
         scenes = z.scenes.get_basic_selection(slice(None), fields=["frame_index_interval"])
         val_data = CustomLyftDataset(
                     z, 
                     scenes = scenes,
-                    nframes=NFRAMES,
-                    frame_stride=FRAME_STRIDE,
-                    hbackward=HBACKWARD,
-                    hforward=HFORWARD,
-                    max_agents=MAX_AGENTS,
-                    agent_feature_dim=AGENT_FEATURE_DIM,
+                    nframes=config.NFRAMES,
+                    frame_stride=config.FRAME_STRIDE,
+                    hbackward=config.HBACKWARD,
+                    hforward=config.HFORWARD,
+                    max_agents=config.MAX_AGENTS,
+                    agent_feature_dim=config.AGENT_FEATURE_DIM,
                 )
         
         val_loader = DataLoader(val_data, batch_size = self.batch_size, collate_fn=collate,
@@ -123,7 +129,7 @@ class LyftNet(BaseNet):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        self.pnet = PointNetfeat()
+        self.pnet = model_dispatcher.MODELS[config.MODEL_NAME]
 
         self.fc0 = nn.Sequential(
             nn.Linear(2048+256, 1024), nn.ReLU(),

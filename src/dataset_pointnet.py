@@ -16,6 +16,7 @@ import cv2
 from PIL import Image, ImageOps, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+from torch.utils.data import Dataset, DataLoader
 
 PERCEPTION_LABELS = [
     "PERCEPTION_LABEL_NOT_SET",
@@ -258,9 +259,9 @@ def collate(x):
 
 def shapefy( xy_pred, xy, xy_av):
     NDIM = 3
-    xy_pred = xy_pred.view(-1, HFORWARD, NDIM, 2)
-    xy = xy.view(-1, HFORWARD, 2)[:,:,None]
-    xy_av = xy_av.view(-1, HFORWARD)[:,:,None]
+    xy_pred = xy_pred.view(-1, config.HFORWARD, NDIM, 2)
+    xy = xy.view(-1, config.HFORWARD, 2)[:,:,None]
+    xy_av = xy_av.view(-1, config.HFORWARD)[:,:,None]
     return xy_pred, xy,xy_av
 
 def LyftLoss(c, xy_pred, xy, xy_av):
@@ -289,6 +290,9 @@ def MSE(xy_pred, xy, xy_av):
 def MAE(xy_pred, xy, xy_av):
     xy_pred, xy, xy_av = shapefy(xy_pred, xy, xy_av)
     return 9*torch.mean(torch.sum(torch.mean(torch.abs(xy_pred-xy), 3)*xy_av, dim=1))
+
+
+
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt

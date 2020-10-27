@@ -77,3 +77,11 @@ GPUS = '1, 2'
 
 arr = [INPUT, OUTPUT, logs_path, save_path]
 make(arr)
+
+
+HBACKWARD = 15
+HFORWARD = 50
+NFRAMES = 10
+FRAME_STRIDE = 15
+AGENT_FEATURE_DIM = 8
+MAX_AGENTS = 150

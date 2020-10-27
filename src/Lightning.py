@@ -14,7 +14,7 @@ from dataset_pointnet import LyftDataModule
 
 class LyftNet(pl.LightningModule):   
     def __init__(self, batch_size=32, lr=5e-4, weight_decay=1e-8, num_workers=0, 
-                 criterion=LyftLoss, data_root=config.DATA_ROOT,  epochs=1):
+                 criterion=LyftLoss,  epochs=1):
         super().__init__()
 
        
@@ -51,44 +51,14 @@ class LyftNet(pl.LightningModule):
         self.weight_decay = weight_decay
         self.criterion = criterion
         
-        self.data_root = data_root
+
+        self.model = model_dispatcher.MODELS[config.MODEL_NAME]
 
         # MODEL Definition
                 
-        self.pnet = model_dispatcher.MODELS[config.MODEL_NAME]
-
-        self.fc0 = nn.Sequential(
-            nn.Linear(2048+256, 1024), nn.ReLU(),
-        )
-
-        self.fc = nn.Sequential(
-            nn.Linear(1024, 300),
-        )
-
-        self.c_net = nn.Sequential(
-            nn.Linear(1024, 3),
-        )
 
     def forward(self, x):
-        bsize, npoints, hb, nf = x.shape 
-        
-        # Push points to the last  dim
-        x = x.transpose(1, 3)
-
-        # Merge time with features
-        x = x.reshape(bsize, hb*nf, npoints)
-
-        x, trans, trans_feat = self.pnet(x)
-
-        # Push featuresxtime to the last dim
-        x = x.transpose(1,2)
-
-        x = self.fc0(x)
-
-        c = self.c_net(x)
-        x = self.fc(x)
-
-        return c,x
+        return self.model(x)
 
     
     def configure_optimizers(self):
@@ -103,49 +73,54 @@ class LyftNet(pl.LightningModule):
         return [optimizer], [scheduler]
 
     
-    def training_step(self, batch):
-        x, y, y_av = batch
+    def training_step(self, batch, batch_idx):
+        x, y, y_av = [b.to(self.device) for b in batch]
         c, preds = self(x)
         loss = self.criterion(c,preds,y, y_av)
         
-        result = pl.TrainResult(minimize=loss)
-        result.loss = loss
         mse = MSE(preds, y, y_av)
-        result.mse = mse
-        result.mae = MAE(preds, y, y_av)
-        result.rmse = torch.sqrt(mse)
-        return result
+        mae = MAE(preds, y, y_av)
+        rmse = torch.sqrt(mse)
+        
+        self.log('loss', loss, prog_bar=True, logger=True, sync_dist=True)
+        self.log('mse', mse, prog_bar=False, logger=True, sync_dist=True)
+        self.log('mae', mae, prog_bar=False, logger=True, sync_dist=True)
+        self.log('rmse', rmse, prog_bar=True, logger=True, sync_dist=True)
+
+        return loss
     
-    def validation_step(self, batch):
-        x, y, y_av = batch
+    def validation_step(self, batch, batch_idx):
+        x, y, y_av = [b.to(self.device) for b in batch]
         c,preds = self(x)
         loss = self.criterion(c, preds, y, y_av)
         
-        result = pl.EvalResult(checkpoint_on=loss, early_stop_on=loss)
-        result.loss = loss
         mse = MSE(preds, y, y_av)
-        result.mse = mse
-        result.mae = MAE(preds, y, y_av)
-        result.rmse = torch.sqrt(mse)
-        result.log('val_loss', loss, prog_bar=True, logger=True, sync_dist=True)
+        mae = MAE(preds, y, y_av)
+        rmse = torch.sqrt(mse)
 
-        return result
+        self.log('val_loss', loss, prog_bar=True, logger=True, sync_dist=True)
+        self.log('val_mse', mse, prog_bar=False, logger=True, sync_dist=True)
+        self.log('val_mae', mae, prog_bar=False, logger=True, sync_dist=True)
+        self.log('val_rmse', rmse, prog_bar=True, logger=True, sync_dist=True)
+
+        return loss
 
 
-    def test_step(self, batch):
-        x, y, y_av = batch
+    def test_step(self, batch, batch_idx):
+        x, y, y_av = [b.to(self.device) for b in batch]
         c,preds = self(x)
         loss = self.criterion(c, preds, y, y_av)
         
-        result = pl.EvalResult(checkpoint_on=loss)
-        result.loss = loss
         mse = MSE(preds, y, y_av)
-        result.mse = mse
-        result.mae = MAE(preds, y, y_av)
-        result.rmse = torch.sqrt(mse)
-        result.log('test_loss', loss, prog_bar=True, logger=True, sync_dist=True)
+        mae = MAE(preds, y, y_av)
+        rmse = torch.sqrt(mse)
 
-        return result
+        self.log('test_loss', loss, prog_bar=True, logger=True, sync_dist=True)
+        self.log('test_mse', mse, prog_bar=False, logger=True, sync_dist=True)
+        self.log('test_mae', mae, prog_bar=False, logger=True, sync_dist=True)
+        self.log('test_rmse', rmse, prog_bar=True, logger=True, sync_dist=True)
+
+        return loss
 
 def find_ckpt():
     val = float('inf')
@@ -178,7 +153,7 @@ if __name__ == "__main__":
     parser.add_argument('--gpus', type=str, default=config.GPUS)
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--dev', type=bool, default=False)
-    parser.add_argument('--num_workers', type=int, default=1)
+    parser.add_argument('--num_workers', type=int, default=6)
     hparams = parser.parse_args()
 
     dm = LyftDataModule(batch_size=hparams.batch_size, num_workers=hparams.num_workers)
@@ -199,15 +174,17 @@ if __name__ == "__main__":
         name='lightning_logs'
     )
 
+    callbacks = [early_stopping]
+
     trainer = pl.Trainer(
         gpus=hparams.gpus,
         accumulate_grad_batches=hparams.accumulate,
         profiler=True,
-        early_stop_callback=early_stopping,
+        callbacks=callbacks,
         checkpoint_callback=model_checkpoint,
         gradient_clip_val=0.5,
         max_epochs=hparams.epochs,
-        distributed_backend='ddp',
+        # distributed_backend='ddp',
         resume_from_checkpoint=resume_from_checkpoint,
         val_check_interval=0.25,
         logger=logger,

@@ -1,5 +1,5 @@
-from model_pointnet import PointNetfeat
+from model_pointnet import PointNetLyft
 
 MODELS = {
-    'POINTNET' : PointNetfeat()
+    'POINTNET' : PointNetLyft()
 }

@@ -263,10 +263,10 @@ class LyftDataModule(pl.LightningDataModule):
 
         if stage == 'fit' or stage is None:
             # print(config.TRAIN_FOLDS)
-            self.train_z = zarr.open(self.data_root.joinpath(config.TRAIN_ZARR).as_posix(), "r")
+            self.train_z = zarr.open(config.TRAIN_ZARR, "r")
             self.train_scenes = self.train_z.scenes.get_basic_selection(slice(None), fields= ["frame_index_interval"])
 
-            self.val_z = zarr.open(self.data_root.joinpath(config.VALID_ZARR).as_posix(), "r")
+            self.val_z = zarr.open(config.VALID_ZARR, "r")
             self.val_scenes = self.val_z.scenes.get_basic_selection(slice(None), fields= ["frame_index_interval"])
 
         if stage == 'test' or stage is None:
@@ -306,7 +306,7 @@ class LyftDataModule(pl.LightningDataModule):
                 )
         
         val_loader = DataLoader(val_data, batch_size = self.batch_size, collate_fn=self.collate,
-                                pin_memory=True, num_workers = self.num_workers, shuffle=True)
+                                pin_memory=True, num_workers = self.num_workers, shuffle=False)
         self._val_data = val_data
         self._val_loader = val_loader
         return val_loader
@@ -320,6 +320,8 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import random
 
+    debug = True
+
     x = 0
     y = 0
 
@@ -329,55 +331,14 @@ if __name__ == "__main__":
 
     dm.setup('fit')
     for batch in dm.train_dataloader():
-        # A, *_ = batch
-        # print(batch)
-        x = batch['image'][0].numpy()
-        print(x)
+        x, y, y_av = batch
         print(x.shape)
-        y = batch['label'][0].squeeze().numpy()
-        print(y)
         print(y.shape)
-        print(config.VOCAB.decoder(y))
-        l = batch['length'][0]
-        print(l)
-        # plt.imshow(x)
-        # plt.show()
-        break
-    # dm.setup('test')
+        print(y_av.shape)
 
-    # data = OCRDataset()
-    # print(len(data))
-    # idx = random.choice(range(len(data)))
-    # datapoint = data[idx]
-    
-    # img = datapoint['image'].squeeze().numpy()
-    # label = datapoint['label'].numpy()
-    # bucket = datapoint['bucket']
-    # key = datapoint['key']
-    # length = datapoint['length']
+        if debug: break
 
-
-    # print(idx, key, bucket)
-    # print(length)
-
-    # print(img.shape)
-    # print(config.VOCAB.decoder(label))
-
-    # plt.imshow(img)
-
-    # plt.show()
-
-    img = x
-    mask = y
-
-    I = np.transpose(img, (1, 2, 0))
-
-    I8 = (((I - I.min()) / (I.max() - I.min())) * 255.0).astype(np.uint8)
-
-    img = Image.fromarray(I8[:,:,0])
-    img.save(config.PLT_PATH)
-    # norm = plt.Normalize(vmin=img.min(), vmax=img.max())
-    # img = norm(img)
-    # plt.imsave(config.PLT_PATH, img)
-
-    # plt.imsave(config.MASK_PATH, mask)
+        print(x)
+        print(y)
+        print(y_av)
+        

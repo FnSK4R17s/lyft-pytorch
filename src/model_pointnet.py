@@ -86,3 +86,43 @@ class PointNetfeat(nn.Module):
         else:
             x = x[:,:,None].repeat(1, 1, n_pts)
             return torch.cat([x, pointfeat], 1), trans, trans_feat
+
+
+class PointNetLyft(nn.Module):
+    def __init__(self):
+        super(PointNetLyft, self).__init__()
+        
+        self.pnet = PointNetfeat()
+
+        self.fc0 = nn.Sequential(
+            nn.Linear(2048+256, 1024), nn.ReLU(),
+        )
+
+        self.fc = nn.Sequential(
+            nn.Linear(1024, 300),
+        )
+
+        self.c_net = nn.Sequential(
+            nn.Linear(1024, 3),
+        )
+
+    def forward(self, x):
+        bsize, npoints, hb, nf = x.shape 
+        
+        # Push points to the last  dim
+        x = x.transpose(1, 3)
+
+        # Merge time with features
+        x = x.reshape(bsize, hb*nf, npoints)
+
+        x, trans, trans_feat = self.pnet(x)
+
+        # Push featuresxtime to the last dim
+        x = x.transpose(1,2)
+
+        x = self.fc0(x)
+
+        c = self.c_net(x)
+        x = self.fc(x)
+
+        return (c,x)

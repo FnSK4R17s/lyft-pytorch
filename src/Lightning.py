@@ -3,19 +3,16 @@ import torch
 import model_dispatcher
 import config
 # from dataset import DATADataModule
-from torch.utils.data import DataLoader
 from glob import glob
 from tqdm import tqdm
 
 from torch import nn, optim
 
-import zarr
-
 from losses import MAE, MSE, LyftLoss
 
 from dataset_pointnet import LyftDataModule
 
-class BaseNet(pl.LightningModule):   
+class LyftNet(pl.LightningModule):   
     def __init__(self, batch_size=32, lr=5e-4, weight_decay=1e-8, num_workers=0, 
                  criterion=LyftLoss, data_root=config.DATA_ROOT,  epochs=1):
         super().__init__()
@@ -56,39 +53,8 @@ class BaseNet(pl.LightningModule):
         
         self.data_root = data_root
 
-    def validation_epoch_end(self, outputs):
-        avg_loss = torch.mean(torch.tensor([x['val_loss'] for x in outputs]))
-        avg_mse = torch.mean(torch.tensor([x['val_mse'] for x in outputs]))
-        avg_mae = torch.mean(torch.tensor([x['val_mae'] for x in outputs]))
-        
-        tensorboard_logs = {'val_loss': avg_loss, "val_rmse": torch.sqrt(avg_mse), "val_mae": avg_mae}
-
-        torch.cuda.empty_cache()
-        gc.collect()
-
-        return {
-            'val_loss': avg_loss,
-            'log': tensorboard_logs,
-            "progress_bar": {"val_ll": tensorboard_logs["val_loss"], "val_rmse": tensorboard_logs["val_rmse"]}
-        }
-
-    
-    def configure_optimizers(self):
-        optimizer =  optim.Adam(self.parameters(), lr= self.lr, betas= (0.9,0.999), 
-                          weight_decay= self.weight_decay, amsgrad=False)
-        
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=self.epochs,
-            eta_min=1e-5,
-        )
-        return [optimizer], [scheduler]
-
-
-class LyftNet(BaseNet):   
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        
+        # MODEL Definition
+                
         self.pnet = model_dispatcher.MODELS[config.MODEL_NAME]
 
         self.fc0 = nn.Sequential(
@@ -102,8 +68,7 @@ class LyftNet(BaseNet):
         self.c_net = nn.Sequential(
             nn.Linear(1024, 3),
         )
-        
-    
+
     def forward(self, x):
         bsize, npoints, hb, nf = x.shape 
         
@@ -124,34 +89,63 @@ class LyftNet(BaseNet):
         x = self.fc(x)
 
         return c,x
+
     
-    def training_step(self, batch, batch_idx):
-        x, y, y_av = [b.to(DEVICE) for b in batch]
+    def configure_optimizers(self):
+        optimizer =  optim.Adam(self.parameters(), lr= self.lr, betas= (0.9,0.999), 
+                          weight_decay= self.weight_decay, amsgrad=False)
+        
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=self.epochs,
+            eta_min=1e-5,
+        )
+        return [optimizer], [scheduler]
+
+    
+    def training_step(self, batch):
+        x, y, y_av = batch
         c, preds = self(x)
         loss = self.criterion(c,preds,y, y_av)
         
-        with torch.no_grad():
-            logs = {
-                'loss': loss,
-                "mse": MSE(preds, y, y_av),
-                "mae": MAE(preds, y, y_av),
-            }
-        return {'loss': loss, 'log': logs, "progress_bar": {"rmse":torch.sqrt(logs["mse"]) }}
+        result = pl.TrainResult(minimize=loss)
+        result.loss = loss
+        mse = MSE(preds, y, y_av)
+        result.mse = mse
+        result.mae = MAE(preds, y, y_av)
+        result.rmse = torch.sqrt(mse)
+        return result
     
-    @torch.no_grad()
-    def validation_step(self, batch, batch_idx):
-        x, y, y_av =  [b.to(DEVICE) for b in batch]
+    def validation_step(self, batch):
+        x, y, y_av = batch
         c,preds = self(x)
         loss = self.criterion(c, preds, y, y_av)
         
-        val_logs = {
-            'val_loss': loss,
-            "val_mse": MSE(preds, y, y_av),
-            "val_mae": MAE(preds, y, y_av),
-        }
-        
-        return val_logs
+        result = pl.EvalResult(checkpoint_on=loss, early_stop_on=loss)
+        result.loss = loss
+        mse = MSE(preds, y, y_av)
+        result.mse = mse
+        result.mae = MAE(preds, y, y_av)
+        result.rmse = torch.sqrt(mse)
+        result.log('val_loss', loss, prog_bar=True, logger=True, sync_dist=True)
 
+        return result
+
+
+    def test_step(self, batch):
+        x, y, y_av = batch
+        c,preds = self(x)
+        loss = self.criterion(c, preds, y, y_av)
+        
+        result = pl.EvalResult(checkpoint_on=loss)
+        result.loss = loss
+        mse = MSE(preds, y, y_av)
+        result.mse = mse
+        result.mae = MAE(preds, y, y_av)
+        result.rmse = torch.sqrt(mse)
+        result.log('test_loss', loss, prog_bar=True, logger=True, sync_dist=True)
+
+        return result
 
 def find_ckpt():
     val = float('inf')

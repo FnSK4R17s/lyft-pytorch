@@ -21,7 +21,7 @@ LR = 0.001
 
 # INPUT_SHAPE = (HEIGHT, CROP_SIZE, CHANNELS)
 
-MODEL_NAME = 'CRNN'
+MODEL_NAME = 'POINTNET'
 
 
 INPUT = os.path.join(os.getcwd(), 'input')

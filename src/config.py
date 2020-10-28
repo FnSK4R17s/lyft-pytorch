@@ -5,8 +5,8 @@ def make(arr):
         if not os.path.exists(path):
             os.mkdir(path)
 
-EPOCHS = 7
-ACCUMULATE = 32
+EPOCHS = 100
+ACCUMULATE = 128
 
 LR = 0.001
 
@@ -16,7 +16,7 @@ INPUT = os.path.join(os.getcwd(), 'input')
 OUTPUT = os.path.join(os.getcwd(), 'output')
 
 
-TRAIN_BATCH_SIZE = 32
+TRAIN_BATCH_SIZE = 100
 VAL_BATCH_SIZE = TRAIN_BATCH_SIZE
 
 
@@ -44,7 +44,9 @@ FRAME_STRIDE = 15
 AGENT_FEATURE_DIM = 8
 MAX_AGENTS = 150
 
-TRAIN_ZARR = os.path.join(INPUT, 'data', 'lyft', 'scenes', 'train.zarr')
+# TRAIN_ZARR = os.path.join(INPUT, 'data', 'lyft', 'scenes', 'train.zarr')
+
+TRAIN_ZARR = os.path.join(INPUT, 'data', 'lyft', 'lyft_full', 'train_full.zarr')
 
 VALID_ZARR = os.path.join(INPUT, 'data', 'lyft', 'scenes', 'validate.zarr')
 

@@ -146,7 +146,15 @@ class CustomLyftDataset(Dataset):
 
 
     def __getitem__(self, index):
-        return self.read_frames(scene=self.scenes[index])
+        frames = self.read_frames(scene=self.scenes[index])
+        # print([f.shape for f in frames])
+        x, y, y_av = frames
+
+        return {
+            'x' : torch.tensor(x, dtype=torch.float),
+            'y' : torch.tensor(y, dtype=torch.float),
+            'y_av' : torch.tensor(y_av, dtype=torch.float),
+        }
 
     def get_nframes(self, scene, start=None):
         frame_start = scene["frame_index_interval"][0]
@@ -311,10 +319,26 @@ class LyftDataModule(pl.LightningDataModule):
         self._val_loader = val_loader
         return val_loader
 
-    def collate(self, x):
-        x = map(np.concatenate, zip(*x))
-        x = map(torch.from_numpy, x)
-        return x
+    def collate(self, batch):
+        x = []
+        y = []
+        y_av = []
+        for item in batch:
+            x.extend(item['x'])
+            y.extend(item['y'])
+            y_av.extend(item['y_av'])
+        
+        return{
+            'x' : torch.stack(x),
+            'y' : torch.stack(y),
+            'y_av' : torch.stack(y_av),
+        }
+
+
+    # def collate(self, x):
+    #     x = map(np.concatenate, zip(*x))
+    #     x = map(torch.from_numpy, x)
+    #     return x
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
@@ -331,7 +355,10 @@ if __name__ == "__main__":
 
     dm.setup('fit')
     for batch in dm.train_dataloader():
-        x, y, y_av = batch
+        x = batch['x'][0].numpy()
+        y = batch['y'][0].numpy()
+        y_av = batch['y_av'][0].numpy()
+        # x, y, y_av = batch
         print(x.shape)
         print(y.shape)
         print(y_av.shape)

@@ -74,7 +74,12 @@ class LyftNet(pl.LightningModule):
 
     
     def training_step(self, batch, batch_idx):
-        x, y, y_av = [b.to(self.device) for b in batch]
+        # x, y, y_av = [b.to(self.device) for b in batch]
+
+        x = batch['x']
+        y = batch['y']
+        y_av = batch['y_av']
+
         c, preds = self(x)
         loss = self.criterion(c,preds,y, y_av)
         
@@ -82,45 +87,61 @@ class LyftNet(pl.LightningModule):
         mae = MAE(preds, y, y_av)
         rmse = torch.sqrt(mse)
         
-        self.log('loss', loss, prog_bar=True, logger=True, sync_dist=True)
-        self.log('mse', mse, prog_bar=False, logger=True, sync_dist=True)
-        self.log('mae', mae, prog_bar=False, logger=True, sync_dist=True)
-        self.log('rmse', rmse, prog_bar=True, logger=True, sync_dist=True)
+        result = pl.TrainResult(minimize=loss)
+        result.loss = loss
+        result.log('loss', loss, prog_bar=False, logger=True, sync_dist=True)
+        result.log('mse', mse, prog_bar=False, logger=True, sync_dist=True)
+        result.log('mae', mae, prog_bar=False, logger=True, sync_dist=True)
+        result.log('rmse', rmse, prog_bar=True, logger=True, sync_dist=True)
 
-        return loss
+        return result
     
     def validation_step(self, batch, batch_idx):
-        x, y, y_av = [b.to(self.device) for b in batch]
+        # x, y, y_av = [b.to(self.device) for b in batch]
+
+        x = batch['x']
+        y = batch['y']
+        y_av = batch['y_av']
+
         c,preds = self(x)
         loss = self.criterion(c, preds, y, y_av)
         
         mse = MSE(preds, y, y_av)
         mae = MAE(preds, y, y_av)
         rmse = torch.sqrt(mse)
+        
+        result = pl.EvalResult(checkpoint_on=loss, early_stop_on=loss)
+        result.loss = loss
+        result.log('val_loss', loss, prog_bar=True, logger=True, sync_dist=True)
+        result.log('val_mse', mse, prog_bar=False, logger=True, sync_dist=True)
+        result.log('val_mae', mae, prog_bar=False, logger=True, sync_dist=True)
+        result.log('val_rmse', rmse, prog_bar=True, logger=True, sync_dist=True)
 
-        self.log('val_loss', loss, prog_bar=True, logger=True, sync_dist=True)
-        self.log('val_mse', mse, prog_bar=False, logger=True, sync_dist=True)
-        self.log('val_mae', mae, prog_bar=False, logger=True, sync_dist=True)
-        self.log('val_rmse', rmse, prog_bar=True, logger=True, sync_dist=True)
-
-        return loss
+        return result
 
 
     def test_step(self, batch, batch_idx):
-        x, y, y_av = [b.to(self.device) for b in batch]
+        # x, y, y_av = [b.to(self.device) for b in batch]
+
+        x = batch['x']
+        y = batch['y']
+        y_av = batch['y_av']
+
         c,preds = self(x)
-        loss = self.criterion(c, preds, y, y_av)
+        test_loss = self.criterion(c, preds, y, y_av)
         
         mse = MSE(preds, y, y_av)
         mae = MAE(preds, y, y_av)
         rmse = torch.sqrt(mse)
+    
+        result = pl.EvalResult(checkpoint_on=loss)
+        result.loss = loss
+        result.log('test_loss', loss, prog_bar=True, logger=True, sync_dist=True)
+        result.log('test_mse', mse, prog_bar=False, logger=True, sync_dist=True)
+        result.log('test_mae', mae, prog_bar=False, logger=True, sync_dist=True)
+        result.log('test_rmse', rmse, prog_bar=True, logger=True, sync_dist=True)
 
-        self.log('test_loss', loss, prog_bar=True, logger=True, sync_dist=True)
-        self.log('test_mse', mse, prog_bar=False, logger=True, sync_dist=True)
-        self.log('test_mae', mae, prog_bar=False, logger=True, sync_dist=True)
-        self.log('test_rmse', rmse, prog_bar=True, logger=True, sync_dist=True)
-
-        return loss
+        return result
 
 def find_ckpt():
     val = float('inf')
@@ -134,6 +155,8 @@ def find_ckpt():
             if v< val:
                 val=v
                 path=ckpt
+        if path != None:
+            print('CKPT found, val=', val, ' Loading..')
     except:
         print('No ckpt found in directory')
 
@@ -153,7 +176,7 @@ if __name__ == "__main__":
     parser.add_argument('--gpus', type=str, default=config.GPUS)
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--dev', type=bool, default=False)
-    parser.add_argument('--num_workers', type=int, default=6)
+    parser.add_argument('--num_workers', type=int, default=5)
     hparams = parser.parse_args()
 
     dm = LyftDataModule(batch_size=hparams.batch_size, num_workers=hparams.num_workers)
@@ -186,9 +209,10 @@ if __name__ == "__main__":
         max_epochs=hparams.epochs,
         # distributed_backend='ddp',
         resume_from_checkpoint=resume_from_checkpoint,
-        val_check_interval=0.25,
         logger=logger,
         fast_dev_run=hparams.dev,
+        val_check_interval=0.25,
+        precision=16
     )
 
     trainer.fit(lit_model, dm)

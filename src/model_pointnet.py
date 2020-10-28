@@ -107,6 +107,9 @@ class PointNetLyft(nn.Module):
         )
 
     def forward(self, x):
+
+        # print(x.shape)
+
         bsize, npoints, hb, nf = x.shape 
         
         # Push points to the last  dim

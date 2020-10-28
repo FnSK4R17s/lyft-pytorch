@@ -8,7 +8,7 @@ def make(arr):
 EPOCHS = 100
 ACCUMULATE = 128
 
-LR = 0.001
+LR = 0.01
 
 MODEL_NAME = 'POINTNET'
 

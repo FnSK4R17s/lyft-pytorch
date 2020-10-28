@@ -13,10 +13,10 @@ from losses import MAE, MSE, LyftLoss
 from dataset_pointnet import LyftDataModule
 
 class LyftNet(pl.LightningModule):   
-    def __init__(self, batch_size=32, lr=5e-4, weight_decay=1e-8, num_workers=0, 
-                 criterion=LyftLoss,  epochs=1):
+    def __init__(self, hparams, criterion=LyftLoss):
         super().__init__()
 
+        self.hparams = hparams
        
         self.save_hyperparameters(
             dict(
@@ -28,29 +28,10 @@ class LyftNet(pl.LightningModule):
                 MAX_AGENTS = config.MAX_AGENTS,
                 TRAIN_ZARR = config.TRAIN_ZARR,
                 VALID_ZARR = config.VALID_ZARR,
-                batch_size = batch_size,
-                lr=lr,
-                weight_decay=weight_decay,
-                num_workers=num_workers,
                 criterion=criterion,
-                epochs=epochs,
             )
         )
-        
-        self._train_data = None
-        self._collate_fn = None
-        self._train_loader = None
-
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        
-        
-        self.lr = lr
-        self.epochs=epochs
-        
-        self.weight_decay = weight_decay
         self.criterion = criterion
-        
 
         self.model = model_dispatcher.MODELS[config.MODEL_NAME]
 
@@ -62,12 +43,12 @@ class LyftNet(pl.LightningModule):
 
     
     def configure_optimizers(self):
-        optimizer =  optim.Adam(self.parameters(), lr= self.lr, betas= (0.9,0.999), 
-                          weight_decay= self.weight_decay, amsgrad=False)
+        optimizer =  optim.Adam(self.parameters(), lr= self.hparams.lr, betas= (0.9,0.999), 
+                          weight_decay= self.hparams.weight_decay, amsgrad=False)
         
         scheduler = optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
-            T_max=self.epochs,
+            T_max=self.hparams.epochs,
             eta_min=1e-5,
         )
         return [optimizer], [scheduler]
@@ -177,6 +158,7 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--dev', type=bool, default=False)
     parser.add_argument('--num_workers', type=int, default=5)
+    parser.add_argument('--weight_decay', type=float, default=1e-8)
     hparams = parser.parse_args()
 
     dm = LyftDataModule(batch_size=hparams.batch_size, num_workers=hparams.num_workers)
@@ -185,7 +167,7 @@ if __name__ == "__main__":
 
     MODEL_SAVE = os.path.join(config.save_path, f'{hparams.model_name}-'+'model_ckpt-{epoch:02d}-{val_loss:.2f}')
 
-    early_stopping = pl.callbacks.EarlyStopping(mode='min', monitor='val_loss', patience=5)
+    early_stopping = pl.callbacks.EarlyStopping(mode='min', monitor='val_loss', patience=20)
     model_checkpoint = pl.callbacks.ModelCheckpoint(filepath=MODEL_SAVE, save_weights_only=False, mode='min', monitor='val_loss', verbose=False)
 
     resume_from_checkpoint = find_ckpt()

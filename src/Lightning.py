@@ -51,7 +51,16 @@ class LyftNet(pl.LightningModule):
             T_max=self.hparams.epochs,
             eta_min=1e-5,
         )
-        return [optimizer], [scheduler]
+
+        lr_plateau = {
+            'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=4, cooldown=1, min_lr=1e-08, verbose=True),
+            'monitor': 'checkpoint_on',  # Default: val_loss
+            'reduce_on_plateau': True,  # For ReduceLROnPlateau scheduler, default
+            'interval': 'epoch',
+            'frequency': 1 
+        }
+
+        return [optimizer], [scheduler, lr_plateau]
 
     
     def training_step(self, batch, batch_idx):
@@ -193,7 +202,7 @@ if __name__ == "__main__":
         resume_from_checkpoint=resume_from_checkpoint,
         logger=logger,
         fast_dev_run=hparams.dev,
-        val_check_interval=0.25,
+        val_check_interval=0.5,
         precision=16
     )
 

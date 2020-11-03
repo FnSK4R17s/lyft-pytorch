@@ -256,10 +256,9 @@ class CustomLyftDataset(Dataset):
 
 
 class LyftDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: str = './', batch_size=10, num_workers=1):
+    def __init__(self, hparams):
         super().__init__()
-        self.batch_size = batch_size
-        self.num_workers = num_workers
+        self.hparams = hparams
 
     def prepare_data(self):
         print("Data preparation done !")
@@ -287,15 +286,15 @@ class LyftDataModule(pl.LightningDataModule):
                     self.train_z, 
                     scenes = self.train_scenes,
                     nframes=config.NFRAMES,
-                    frame_stride=config.FRAME_STRIDE,
+                    frame_stride=self.hparams.frame_stride,
                     hbackward=config.HBACKWARD,
                     hforward=config.HFORWARD,
                     max_agents=config.MAX_AGENTS,
                     agent_feature_dim=config.AGENT_FEATURE_DIM,
                 )
         
-        train_loader = DataLoader(train_data, batch_size = self.batch_size,collate_fn=self.collate,
-                                pin_memory=True, num_workers = self.num_workers, shuffle=True)
+        train_loader = DataLoader(train_data, batch_size = self.hparams.batch_size,collate_fn=self.collate,
+                                pin_memory=True, num_workers = self.hparams.num_workers, shuffle=True)
         self._train_data = train_data
         self._train_loader = train_loader
         
@@ -306,15 +305,15 @@ class LyftDataModule(pl.LightningDataModule):
                     self.val_z, 
                     scenes = self.val_scenes,
                     nframes=config.NFRAMES,
-                    frame_stride=config.FRAME_STRIDE,
+                    frame_stride=self.hparams.frame_stride,
                     hbackward=config.HBACKWARD,
                     hforward=config.HFORWARD,
                     max_agents=config.MAX_AGENTS,
                     agent_feature_dim=config.AGENT_FEATURE_DIM,
                 )
         
-        val_loader = DataLoader(val_data, batch_size = self.batch_size, collate_fn=self.collate,
-                                pin_memory=True, num_workers = self.num_workers, shuffle=False)
+        val_loader = DataLoader(val_data, batch_size = self.hparams.batch_size, collate_fn=self.collate,
+                                pin_memory=True, num_workers = self.hparams.num_workers, shuffle=False)
         self._val_data = val_data
         self._val_loader = val_loader
         return val_loader

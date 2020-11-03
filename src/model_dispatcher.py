@@ -1,5 +1,6 @@
-from model_pointnet import PointNetLyft
+from model_pointnet import PointNetLyft, PointNetGlobal
 
 MODELS = {
-    'POINTNET' : PointNetLyft()
+    'POINTNET' : PointNetLyft(),
+    'POINTNET_G' : PointNetGlobal()
 }

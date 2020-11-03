@@ -17,20 +17,20 @@ class LyftNet(pl.LightningModule):
         super().__init__()
 
         self.hparams = hparams
-       
-        self.save_hyperparameters(
-            dict(
-                HBACKWARD = config.HBACKWARD,
-                HFORWARD = config.HFORWARD,
-                NFRAMES = config.NFRAMES,
-                FRAME_STRIDE = config.FRAME_STRIDE,
-                AGENT_FEATURE_DIM = config.AGENT_FEATURE_DIM,
-                MAX_AGENTS = config.MAX_AGENTS,
-                TRAIN_ZARR = config.TRAIN_ZARR,
-                VALID_ZARR = config.VALID_ZARR,
-                criterion=criterion,
-            )
-        )
+        self.save_hyperparameters(self.hparams)
+        # self.save_hyperparameters(
+        #     dict(
+        #         HBACKWARD = config.HBACKWARD,
+        #         HFORWARD = config.HFORWARD,
+        #         NFRAMES = config.NFRAMES,
+        #         FRAME_STRIDE = config.FRAME_STRIDE,
+        #         AGENT_FEATURE_DIM = config.AGENT_FEATURE_DIM,
+        #         MAX_AGENTS = config.MAX_AGENTS,
+        #         TRAIN_ZARR = config.TRAIN_ZARR,
+        #         VALID_ZARR = config.VALID_ZARR,
+        #         criterion=criterion,
+        #     )
+        # )
         self.criterion = criterion
 
         self.model = model_dispatcher.MODELS[config.MODEL_NAME]
@@ -43,7 +43,10 @@ class LyftNet(pl.LightningModule):
 
     
     def configure_optimizers(self):
-        optimizer =  optim.Adam(self.parameters(), lr= self.hparams.lr, betas= (0.9,0.999), 
+        # optimizer =  optim.Adam(self.parameters(), lr= self.hparams.lr, betas= (0.9,0.999), 
+        #                   weight_decay= self.hparams.weight_decay, amsgrad=False)
+        
+        optimizer =  optim.Adam(self.parameters(), lr= config.LR, betas= (0.9,0.999), 
                           weight_decay= self.hparams.weight_decay, amsgrad=False)
         
         scheduler = optim.lr_scheduler.CosineAnnealingLR(
@@ -53,7 +56,7 @@ class LyftNet(pl.LightningModule):
         )
 
         lr_plateau = {
-            'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=4, cooldown=1, min_lr=1e-08, verbose=True),
+            'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=4, cooldown=1, min_lr=1e-08, verbose=True),
             'monitor': 'checkpoint_on',  # Default: val_loss
             'reduce_on_plateau': True,  # For ReduceLROnPlateau scheduler, default
             'interval': 'epoch',
@@ -138,7 +141,7 @@ def find_ckpt():
     path = None
     try:
         print('Looking for ckpts')
-        for ckpt in tqdm(glob(os.path.join(config.save_path,'*.ckpt'))):
+        for ckpt in tqdm(glob(os.path.join(config.save_path,f'{config.MODEL_NAME}-*.ckpt'))):
             basename = os.path.basename(ckpt)
             c = basename.split('.ckpt')[0]
             v = (float)((c.split('-')[-1]).split('=')[-1])
@@ -146,7 +149,7 @@ def find_ckpt():
                 val=v
                 path=ckpt
         if path != None:
-            print('CKPT found, val=', val, ' Loading..')
+            print('CKPT found, val =', val, ' Loading..')
     except:
         print('No ckpt found in directory')
 
@@ -164,13 +167,14 @@ if __name__ == "__main__":
     parser.add_argument('--accumulate', type=int, default=config.ACCUMULATE)
     parser.add_argument('--aws', type=bool, default=True)
     parser.add_argument('--gpus', type=str, default=config.GPUS)
-    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--dev', type=bool, default=False)
-    parser.add_argument('--num_workers', type=int, default=5)
+    parser.add_argument('--num_workers', type=int, default=3)
     parser.add_argument('--weight_decay', type=float, default=1e-8)
+    parser.add_argument('--frame_stride', type=int, default=config.FRAME_STRIDE)
     hparams = parser.parse_args()
 
-    dm = LyftDataModule(batch_size=hparams.batch_size, num_workers=hparams.num_workers)
+    dm = LyftDataModule(hparams)
 
     lit_model = LyftNet(hparams)
 
@@ -184,7 +188,7 @@ if __name__ == "__main__":
     # default logger used by trainer
     logger = TensorBoardLogger(
         save_dir=os.getcwd(),
-        version=1,
+        version=2,
         name='lightning_logs'
     )
 
@@ -196,13 +200,13 @@ if __name__ == "__main__":
         profiler=True,
         callbacks=callbacks,
         checkpoint_callback=model_checkpoint,
-        gradient_clip_val=0.5,
+        gradient_clip_val=1.0,
         max_epochs=hparams.epochs,
         # distributed_backend='ddp',
         resume_from_checkpoint=resume_from_checkpoint,
         logger=logger,
         fast_dev_run=hparams.dev,
-        val_check_interval=0.5,
+        # val_check_interval=0.5,
         precision=16
     )
 

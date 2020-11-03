@@ -129,3 +129,45 @@ class PointNetLyft(nn.Module):
         x = self.fc(x)
 
         return (c,x)
+
+class PointNetGlobal(nn.Module):
+    def __init__(self):
+        super(PointNetGlobal, self).__init__()
+        
+        self.pnet = PointNetfeat(global_feat = False, feature_transform = True, stn1_dim = 120, stn2_dim = 256)
+
+        self.fc0 = nn.Sequential(
+            nn.Linear(2048+256, 1024), nn.ReLU(),
+        )
+
+        self.fc = nn.Sequential(
+            nn.Linear(1024, 300),
+        )
+
+        self.c_net = nn.Sequential(
+            nn.Linear(1024, 3),
+        )
+
+    def forward(self, x):
+
+        # print(x.shape)
+
+        bsize, npoints, hb, nf = x.shape 
+        
+        # Push points to the last  dim
+        x = x.transpose(1, 3)
+
+        # Merge time with features
+        x = x.reshape(bsize, hb*nf, npoints)
+
+        x, trans, trans_feat = self.pnet(x)
+
+        # Push featuresxtime to the last dim
+        x = x.transpose(1,2)
+
+        x = self.fc0(x)
+
+        c = self.c_net(x)
+        x = self.fc(x)
+
+        return (c,x)

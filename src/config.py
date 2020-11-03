@@ -8,9 +8,9 @@ def make(arr):
 EPOCHS = 100
 ACCUMULATE = 128
 
-LR = 0.01
+LR = 0.0001
 
-MODEL_NAME = 'POINTNET'
+MODEL_NAME = 'POINTNET_G'
 
 INPUT = os.path.join(os.getcwd(), 'input')
 OUTPUT = os.path.join(os.getcwd(), 'output')

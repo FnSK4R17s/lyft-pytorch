@@ -18,19 +18,6 @@ class LyftNet(pl.LightningModule):
 
         self.hparams = hparams
         self.save_hyperparameters(self.hparams)
-        # self.save_hyperparameters(
-        #     dict(
-        #         HBACKWARD = config.HBACKWARD,
-        #         HFORWARD = config.HFORWARD,
-        #         NFRAMES = config.NFRAMES,
-        #         FRAME_STRIDE = config.FRAME_STRIDE,
-        #         AGENT_FEATURE_DIM = config.AGENT_FEATURE_DIM,
-        #         MAX_AGENTS = config.MAX_AGENTS,
-        #         TRAIN_ZARR = config.TRAIN_ZARR,
-        #         VALID_ZARR = config.VALID_ZARR,
-        #         criterion=criterion,
-        #     )
-        # )
         self.criterion = criterion
 
         self.model = model_dispatcher.MODELS[config.MODEL_NAME]
@@ -48,7 +35,7 @@ class LyftNet(pl.LightningModule):
         
         optimizer =  optim.Adam(self.parameters(), lr= config.LR, betas= (0.9,0.999), 
                           weight_decay= self.hparams.weight_decay, amsgrad=False)
-        
+
         scheduler = optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
             T_max=self.hparams.epochs,
@@ -56,9 +43,9 @@ class LyftNet(pl.LightningModule):
         )
 
         lr_plateau = {
-            'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=4, cooldown=1, min_lr=1e-08, verbose=True),
+            'scheduler': torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.7, patience=self.hparams.lr_patience, cooldown=1, min_lr=1e-5, verbose=True),
             'monitor': 'checkpoint_on',  # Default: val_loss
-            'reduce_on_plateau': True,  # For ReduceLROnPlateau scheduler, default
+            'reduce_on_plateau': False,  # For ReduceLROnPlateau scheduler, default
             'interval': 'epoch',
             'frequency': 1 
         }
@@ -80,6 +67,11 @@ class LyftNet(pl.LightningModule):
         mae = MAE(preds, y, y_av)
         rmse = torch.sqrt(mse)
         
+        # metric = (self.hparams.alpha*loss) + ((1-self.hparams.alpha)*rmse)
+        # result = pl.TrainResult(minimize=metric)
+        # result.loss = metric
+        # result.log('metric', metric, prog_bar=True, logger=True, sync_dist=True)
+
         result = pl.TrainResult(minimize=loss)
         result.loss = loss
         result.log('loss', loss, prog_bar=False, logger=True, sync_dist=True)
@@ -171,6 +163,9 @@ if __name__ == "__main__":
     parser.add_argument('--dev', type=bool, default=False)
     parser.add_argument('--num_workers', type=int, default=3)
     parser.add_argument('--weight_decay', type=float, default=1e-8)
+    parser.add_argument('--alpha', type=float, default=0.5)
+    parser.add_argument('--lr_patience', type=int, default=4)
+    parser.add_argument('--es_patience', type=int, default=10)
     parser.add_argument('--frame_stride', type=int, default=config.FRAME_STRIDE)
     hparams = parser.parse_args()
 
@@ -180,7 +175,7 @@ if __name__ == "__main__":
 
     MODEL_SAVE = os.path.join(config.save_path, f'{hparams.model_name}-'+'model_ckpt-{epoch:02d}-{val_loss:.2f}')
 
-    early_stopping = pl.callbacks.EarlyStopping(mode='min', monitor='val_loss', patience=20)
+    early_stopping = pl.callbacks.EarlyStopping(mode='min', monitor='val_loss', patience=hparams.es_patience)
     model_checkpoint = pl.callbacks.ModelCheckpoint(filepath=MODEL_SAVE, save_weights_only=False, mode='min', monitor='val_loss', verbose=False)
 
     resume_from_checkpoint = find_ckpt()
